@@ -1,50 +1,64 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { useGLTF, useAnimations } from '@react-three/drei';
-import useSceneStore from '../../../app/store/useSceneStore';
+import { useGraph } from '@react-three/fiber';
+import { SkeletonUtils } from 'three-stdlib';
+import * as THREE from 'three';
 
-// URLs ESTÁVEIS (Direto do Repositório Three.js)
-const MODEL_MALE = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Xbot.glb';
-const MODEL_FEMALE = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Michelle.glb';
+// AGORA É O XBOT (O "OUTRO" MANEQUIM)
+const MODEL_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/Xbot.glb';
 
-export default function MannequinManager() {
+export default function MannequinManager({ isPlaying }) {
   const group = useRef();
-  const { mannequin } = useSceneStore();
   
-  // Seleciona a URL correta
-  const url = mannequin.type === 'male' ? MODEL_MALE : MODEL_FEMALE;
+  // Carrega o modelo Xbot
+  const { scene, animations } = useGLTF(MODEL_URL);
   
-  const { nodes, animations } = useGLTF(url);
+  // Clona para garantir isolamento
+  const clone = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const { nodes } = useGraph(clone);
   const { actions } = useAnimations(animations, group);
 
+  // 1. EFEITO: PINTAR DE ROSA
   useEffect(() => {
-    // Tenta encontrar uma animação válida (Idle, mixamo.com, ou a primeira disponível)
-    const animName = animations.find(a => 
-      a.name.toLowerCase().includes('idle') || 
-      a.name.toLowerCase().includes('mixamo')
-    )?.name || animations[0]?.name;
-    
-    if (actions[animName]) {
-      if (mannequin.animation.isPlaying) {
-        actions[animName].reset().fadeIn(0.5).play();
-        actions[animName].timeScale = mannequin.animation.speed;
+    clone.traverse((child) => {
+      if (child.isMesh) {
+        child.material = new THREE.MeshStandardMaterial({
+          color: '#ffc0cb', // Rosa Salmão
+          roughness: 0.6,
+          metalness: 0.1,
+          // skinning: true <-- Removido para evitar erro
+        });
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }, [clone]);
+
+  // 2. EFEITO: ANIMAÇÃO (Procura 'idle' ou 'agree' ou usa a primeira)
+  useEffect(() => {
+    // Tenta achar animação de "Idle" ou pega a primeira disponível
+    const actionName = Object.keys(actions).find(name => name.toLowerCase().includes('idle')) || Object.keys(actions)[0];
+    const action = actions[actionName];
+
+    if (action) {
+      if (isPlaying) {
+        action.reset().fadeIn(0.5).play();
+        action.paused = false;
       } else {
-        actions[animName].paused = true;
+        action.paused = true;
       }
     }
-    return () => actions[animName]?.fadeOut(0.5);
-  }, [url, actions, mannequin.animation.isPlaying, mannequin.animation.speed, animations]);
+    
+    return () => {
+      if (action) action.fadeOut(0.5);
+    };
+  }, [actions, isPlaying]);
 
   return (
     <group ref={group} dispose={null}>
-      {/* Ajustamos a escala da Michelle pois ela pode vir em tamanho diferente */}
-      <primitive 
-        object={nodes.Scene || nodes.mixamorigHips || nodes.Hips} 
-        scale={mannequin.type === 'male' ? [1,1,1] : [1,1,1]} 
-      />
+      <primitive object={clone} scale={[1, 1, 1]} />
     </group>
   );
 }
 
-// Pré-carregamento
-useGLTF.preload(MODEL_MALE);
-useGLTF.preload(MODEL_FEMALE);
+useGLTF.preload(MODEL_URL);

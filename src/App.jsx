@@ -1,159 +1,260 @@
-import React, { Suspense, useState } from 'react';
+import React, { Suspense, useState, useRef, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { Loader } from '@react-three/drei';
+import { Loader, OrbitControls, Grid, Environment, ContactShadows } from '@react-three/drei';
 import { 
-  Box, ChevronDown, ChevronRight, Search, Settings, 
-  Save, Download, Users, Shirt, Scissors, PaintBucket,
-  MoreHorizontal, Plus, Trash2, Eye, Grid3X3, Layers,
-  Move, Maximize, Rotate3d, Database
+  Move, Scissors, PaintBucket, Save, Circle, Undo, RotateCcw, 
+  Zap, User, Plus, Play, Pause, Brush, Palette, Layers, Droplet, 
+  Eye, MousePointer2, Maximize, Rotate3d
 } from 'lucide-react';
 import { HexColorPicker } from "react-colorful";
 
+// --- IMPORTS DAS SUAS STORES E COMPONENTES ---
 import useAppStore from './app/store/useAppStore';
 import useSceneStore from './app/store/useSceneStore';
-import MainScene from './scene/MainScene';
+import Attachment from './components/canvas/Attachment';
+import MannequinManager from './components/canvas/mannequin/MannequinManager';
 
-// --- COMPONENTES VISUAIS ESTILO UNREAL ENGINE 5 ---
+// ==========================================
+// 1. CENA PRINCIPAL (MAIN SCENE)
+// ==========================================
+const MainScene = ({ gender, physicsEnabled, isPlaying }) => {
+  const { objects, selectedObjectId, selectObject, updateObject, isAltPressed } = useSceneStore();
+  const { activeTool } = useAppStore();
 
-// 1. HEADER (Menu Superior)
+  const cameraEnabled = activeTool === 'select' || isAltPressed;
+
+  return (
+    <>
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow />
+      <spotLight position={[-5, 5, 2]} intensity={0.8} color="#ffffff" /> 
+      <Environment preset="city" blur={1} />
+      
+      <Grid infiniteGrid fadeDistance={40} sectionColor="#444" cellColor="#222" />
+      
+      <MannequinManager type={gender} isPlaying={isPlaying} />
+
+      {objects.map((obj) => (
+        <Attachment
+          key={obj.id}
+          {...obj}
+          isSelected={obj.id === selectedObjectId}
+          onSelect={selectObject}
+          onGizmoChange={(id, newData) => updateObject(id, newData)}
+        />
+      ))}
+
+      {physicsEnabled && (
+        <mesh position={[0, 2.2, 0]}>
+          <sphereGeometry args={[0.05]} />
+          <meshBasicMaterial color="yellow" />
+        </mesh>
+      )}
+
+      <ContactShadows resolution={1024} scale={10} blur={2} opacity={0.5} far={10} color="#000000" />
+      
+      <OrbitControls 
+        makeDefault 
+        enabled={cameraEnabled} 
+        minPolarAngle={0} 
+        maxPolarAngle={Math.PI / 1.8} 
+        target={[0, 1, 0]} 
+      />
+    </>
+  );
+};
+
+// ==========================================
+// 2. HEADER (COM LOGO "METAHUMAN STYLE")
+// ==========================================
 const UE5Header = () => {
   const { activeTool, setActiveTool } = useAppStore();
-  const { requestExport } = useSceneStore();
+  const { mannequin, physics, togglePhysics, requestExport, toggleAnimation } = useSceneStore();
+  const { undo, redo } = useSceneStore.temporal.getState();
+
+  const isPlaying = mannequin?.animation?.isPlaying ?? true;
 
   const modes = [
-    { id: 'select', label: 'SELECTION', icon: Move },
-    { id: 'sculpt', label: 'SCULPTING', icon: Scissors },
-    { id: 'paint', label: 'TEXTURING', icon: PaintBucket },
+    { id: 'select', label: 'SELECT', icon: Move },
+    { id: 'sculpt', label: 'SCULPT', icon: Scissors },
+    { id: 'paint', label: 'PAINT', icon: PaintBucket },
   ];
 
   return (
-    <div className="h-12 bg-[#111111] border-b border-[#333] flex items-center justify-between px-4 select-none">
-      {/* Logo e Menu Arquivo */}
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-[#0070e0] rounded-full flex items-center justify-center font-bold text-white italic text-xs">u</div>
-          <span className="font-bold text-gray-200 tracking-wide text-sm">MetaCloth <span className="text-[#0070e0]">EDITOR</span></span>
+    <div className="h-14 bg-[#111111] border-b border-[#333] flex items-center justify-between px-6 select-none z-50 shadow-md">
+      
+      {/* --- ÁREA DO LOGO (ATUALIZADA) --- */}
+      <div className="flex items-center gap-8">
+        <div className="flex items-center gap-3">
+          {/* Ícone Estilo Unreal/MetaHuman */}
+          <div className="w-8 h-8 bg-gradient-to-br from-[#0070e0] to-[#004790] rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(0,112,224,0.4)] border border-[#ffffff20]">
+            <span className="font-bold text-white italic text-sm pr-0.5" style={{ fontFamily: 'serif' }}>M</span>
+          </div>
+          {/* Texto Estilo MetaHuman Creator */}
+          <div className="flex flex-col justify-center leading-none">
+            <span className="font-bold text-gray-100 tracking-wider text-sm">METACLOTH</span>
+            <span className="text-[9px] text-[#0070e0] font-bold tracking-[0.25em] uppercase">Creator</span>
+          </div>
         </div>
         
-        <div className="flex items-center gap-4 text-[11px] text-gray-400 font-medium">
-          <span className="hover:text-white cursor-pointer">File</span>
-          <span className="hover:text-white cursor-pointer">Edit</span>
-          <span className="hover:text-white cursor-pointer">Window</span>
-          <span className="hover:text-white cursor-pointer">Tools</span>
-          <span className="hover:text-white cursor-pointer">Help</span>
+        {/* Undo/Redo Separados */}
+        <div className="flex items-center gap-1 border-l border-[#333] pl-6">
+            <button onClick={() => undo()} className="p-2 hover:bg-[#333] rounded-md text-gray-400 hover:text-white transition-colors" title="Undo (Ctrl+Z)"><Undo size={16} /></button>
+            <button onClick={() => redo()} className="p-2 hover:bg-[#333] rounded-md text-gray-400 hover:text-white transition-colors" title="Redo"><RotateCcw size={16} className="scale-x-[-1]" /></button>
         </div>
       </div>
 
-      {/* Abas de Modo Central (Style MetaHuman) */}
-      <div className="flex bg-[#0a0a0a] rounded p-1 border border-[#333]">
+      {/* --- FERRAMENTAS CENTRAIS --- */}
+      <div className="flex bg-[#0a0a0a] rounded-lg p-1 border border-[#333] shadow-inner">
         {modes.map(mode => (
-          <button
-            key={mode.id}
-            onClick={() => setActiveTool(mode.id)}
-            className={`
-              flex items-center gap-2 px-6 py-1.5 rounded text-[10px] font-bold tracking-wider transition-all
-              ${activeTool === mode.id 
-                ? 'bg-[#333] text-white shadow-sm' 
-                : 'text-gray-500 hover:text-gray-300 hover:bg-[#222]'}
-            `}
+          <button 
+            key={mode.id} 
+            onClick={() => setActiveTool(mode.id)} 
+            className={`flex items-center gap-2 px-6 py-2 rounded-md text-[10px] font-bold tracking-wider transition-all 
+            ${activeTool === mode.id ? 'bg-[#333] text-white shadow-sm border border-[#444]' : 'text-gray-500 hover:text-gray-300 hover:bg-[#1a1a1a]'}`}
           >
-            <mode.icon size={12} />
-            {mode.label}
+            <mode.icon size={14} /> {mode.label}
           </button>
         ))}
       </div>
 
-      {/* Ações Direita */}
-      <div className="flex items-center gap-3">
-        <button onClick={requestExport} className="bg-[#0070e0] hover:bg-[#005bb5] text-white px-4 py-1.5 rounded text-[11px] font-bold flex items-center gap-2 transition-colors">
-          <Save size={12}/> SAVE ASSET
+      {/* --- AÇÕES À DIREITA --- */}
+      <div className="flex items-center gap-4">
+         <button 
+            onClick={toggleAnimation} 
+            className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold border border-[#333] transition-all
+            ${isPlaying ? 'bg-green-900/30 text-green-400 border-green-800' : 'bg-[#222] text-gray-400'}`}
+         >
+            {isPlaying ? <Pause size={12}/> : <Play size={12}/>}
+            {isPlaying ? 'ANIM: ON' : 'ANIM: OFF'}
         </button>
-        <div className="w-8 h-8 bg-[#222] rounded-full flex items-center justify-center border border-[#444]">
-           <Settings size={14} className="text-gray-400"/>
-        </div>
+
+        <button 
+            onClick={togglePhysics} 
+            className={`p-2 rounded border border-[#333] transition-all 
+            ${physics.isEnabled ? 'bg-yellow-600/20 text-yellow-400 border-yellow-600 shadow-[0_0_8px_rgba(234,179,8,0.2)]' : 'bg-[#222] text-gray-500 hover:text-gray-300'}`}
+            title="Physics Simulation"
+        >
+            <Zap size={16} className={physics.isEnabled ? "fill-current" : ""} />
+        </button>
+
+        <button onClick={requestExport} className="bg-[#0070e0] hover:bg-[#005bb5] text-white px-5 py-2 rounded text-[11px] font-bold flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
+          <Save size={14}/> EXPORT
+        </button>
       </div>
     </div>
   );
 };
 
-// 2. SIDEBAR ESQUERDA (Asset Browser / Presets)
-const UE5AssetBrowser = () => {
+// ==========================================
+// 3. PAINEL ESQUERDO (BLEND)
+// ==========================================
+const LeftPanelBlend = () => {
   const { addObject } = useSceneStore();
-  const [category, setCategory] = useState('tops');
+  const [slots, setSlots] = useState({ top: null, left: null, right: null });
+  const [weights, setWeights] = useState({ top: 0, left: 0, right: 0 }); 
+  const [puckPos, setPuckPos] = useState({ x: 0, y: 0 });
+  const [isDraggingPuck, setIsDraggingPuck] = useState(false);
+  const blendAreaRef = useRef(null);
 
-  // Simulando categorias do MetaHuman
-  const categories = [
-    { id: 'tops', label: 'Tops / Shirts', icon: Shirt },
-    { id: 'bottoms', label: 'Bottoms', icon: Layers },
-    { id: 'shoes', label: 'Shoes', icon: Box },
-    { id: 'body', label: 'Body Type', icon: Users },
-  ];
-
-  // Presets visuais (Mockup)
   const presets = [
-    { id: 'box', name: 'Basic Cube', type: 'box', thumb: 'bg-gray-700' },
-    { id: 'sphere', name: 'Sphere Base', type: 'sphere', thumb: 'bg-gray-600 rounded-full' },
-    { id: 'cylinder', name: 'Cylinder', type: 'cylinder', thumb: 'bg-gray-500 mx-auto w-1/2 h-full' },
-    { id: 'plane', name: 'Fabric Plane', type: 'plane', thumb: 'bg-gray-400 h-2 mt-6' },
-    { id: 'tshirt', name: 'T-Shirt Base', type: 'box', thumb: 'bg-blue-900/40 border border-blue-500/30' }, // Simulado
-    { id: 'hoodie', name: 'Hoodie', type: 'sphere', thumb: 'bg-red-900/40 border border-red-500/30' },
+      { id: 'fit', name: 'Fit Slim', type: 'box' }, 
+      { id: 'over', name: 'Oversized', type: 'sphere' }, 
+      { id: 'ath', name: 'Athletic', type: 'cylinder' }, 
+      { id: 'cas', name: 'Casual', type: 'plane' }
   ];
+
+  const handleDragStart = (e, preset) => { 
+      e.dataTransfer.setData("presetId", preset.id); 
+      e.dataTransfer.setData("presetName", preset.name); 
+      e.dataTransfer.setData("presetType", preset.type); 
+  };
+  const handleDropSlot = (e, position) => { 
+      e.preventDefault(); 
+      const id = e.dataTransfer.getData("presetId"); 
+      const name = e.dataTransfer.getData("presetName"); 
+      const type = e.dataTransfer.getData("presetType");
+      if(id) setSlots(prev => ({ ...prev, [position]: { id, name, type } })); 
+  };
+  const handleMouseDown = () => setIsDraggingPuck(true);
+
+  const distance = (x1, y1, x2, y2) => Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDraggingPuck || !blendAreaRef.current) return;
+      const rect = blendAreaRef.current.getBoundingClientRect();
+      const centerX = rect.width / 2; const centerY = rect.height / 2; 
+      let x = e.clientX - rect.left - centerX; let y = e.clientY - rect.top - centerY;
+      const radius = 60; const dist = Math.sqrt(x*x + y*y);
+      if (dist > radius) { x = (x / dist) * radius; y = (y / dist) * radius; }
+      setPuckPos({ x, y });
+      
+      const maxDist = radius * 2;
+      const dTop = distance(x, y, 0, -radius); 
+      const dLeft = distance(x, y, -radius * 0.86, radius * 0.5); 
+      const dRight = distance(x, y, radius * 0.86, radius * 0.5);
+      
+      const total = (Math.max(0, 1 - (dTop/maxDist)) + Math.max(0, 1 - (dLeft/maxDist)) + Math.max(0, 1 - (dRight/maxDist))) || 1;
+      setWeights({ 
+          top: Math.round((Math.max(0, 1 - (dTop/maxDist)) / total) * 100), 
+          left: Math.round((Math.max(0, 1 - (dLeft/maxDist)) / total) * 100), 
+          right: Math.round((Math.max(0, 1 - (dRight/maxDist)) / total) * 100) 
+      });
+    };
+    const handleMouseUp = () => setIsDraggingPuck(false);
+    if (isDraggingPuck) { window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); }
+    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
+  }, [isDraggingPuck]);
+
+  const handleGenerate = () => {
+    let dominantType = 'box';
+    if(slots.top && weights.top > 40) dominantType = slots.top.type;
+    else if(slots.left && weights.left > 40) dominantType = slots.left.type;
+    else if(slots.right && weights.right > 40) dominantType = slots.right.type;
+    else if(slots.top) dominantType = slots.top.type;
+
+    addObject({ 
+        name: `Blend ${dominantType}`, 
+        type: dominantType, 
+        blendWeights: { ...weights },
+        position: [0, 1, 0.5] 
+    });
+  };
 
   return (
-    <div className="w-72 bg-[#151515] border-r border-[#222] flex flex-col h-full">
-      {/* Título da Aba */}
-      <div className="h-8 bg-[#1a1a1a] border-b border-[#333] flex items-center px-3 justify-between">
-        <span className="text-[11px] font-bold text-gray-300 flex items-center gap-2">
-           <Database size={12} className="text-[#0070e0]"/> CONTENT BROWSER
-        </span>
-        <MoreHorizontal size={12} className="text-gray-500"/>
+    <div className="w-80 bg-[#151515] border-r border-[#222] flex flex-col h-full text-gray-300 select-none z-10">
+      <div className="flex border-b border-[#222] bg-[#1a1a1a] p-3 gap-1 items-center justify-center shadow-sm">
+         <span className="text-[11px] font-bold text-[#0070e0] flex items-center gap-2 tracking-widest"><Circle size={10} className="fill-current"/> BLEND MANAGER</span>
       </div>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Barra de Categorias Vertical */}
-        <div className="w-12 bg-[#0f0f0f] border-r border-[#222] flex flex-col items-center py-2 gap-2">
-           {categories.map(cat => (
-             <button 
-               key={cat.id} 
-               onClick={() => setCategory(cat.id)}
-               className={`p-2 rounded hover:bg-[#333] transition-colors relative group ${category === cat.id ? 'text-[#0070e0]' : 'text-gray-500'}`}
-             >
-               <cat.icon size={18}/>
-               {category === cat.id && <div className="absolute left-0 top-2 bottom-2 w-0.5 bg-[#0070e0]"></div>}
-             </button>
-           ))}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <div className="bg-[#1a1a1a] border border-[#333] rounded-lg p-2 relative select-none shadow-lg">
+           <div className="h-64 relative flex justify-center mt-4" ref={blendAreaRef}>
+              <div className="absolute top-8 w-48 h-48 rounded-full border-4 border-t-white/10 border-x-white/10 border-b-transparent pointer-events-none"></div>
+              {['top', 'left', 'right'].map(pos => (
+                 <div key={pos} className={`absolute ${pos === 'top' ? 'top-0' : 'bottom-4'} ${pos === 'left' ? 'left-2' : pos === 'right' ? 'right-2' : ''} flex flex-col items-center gap-1`} onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDropSlot(e, pos)}>
+                    <div className={`w-20 h-24 bg-[#0f0f0f] border ${slots[pos] ? 'border-[#0070e0] bg-[#0070e0]/10' : 'border-[#444]'} rounded hover:border-white flex flex-col items-center justify-center transition-colors border-dashed`}>
+                       {slots[pos] ? <span className="text-[9px] text-white font-bold">{slots[pos].name}</span> : <span className="text-[9px] text-gray-600 font-medium">Drop Asset</span>}
+                    </div>
+                 </div>
+              ))}
+              <div className="absolute top-1/2 left-1/2 w-6 h-6 bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.8)] cursor-move hover:scale-110 transition-transform z-10" style={{ transform: `translate(calc(-50% + ${puckPos.x}px), calc(-25% + ${puckPos.y}px))` }} onMouseDown={handleMouseDown}></div>
+           </div>
+           
+           <div className="mt-4 px-2 pb-2">
+               <button onClick={handleGenerate} className="w-full bg-[#0070e0] hover:bg-[#005bb5] text-white py-2.5 rounded text-[11px] font-bold flex items-center justify-center gap-2 active:scale-95 transition-all shadow-md">
+                 <Plus size={14} /> GENERATE MESH
+               </button>
+           </div>
         </div>
 
-        {/* Grid de Assets */}
-        <div className="flex-1 flex flex-col bg-[#151515]">
-           <div className="p-2 border-b border-[#222]">
-              <div className="bg-[#0a0a0a] border border-[#333] rounded flex items-center px-2 py-1 gap-2">
-                 <Search size={12} className="text-gray-500"/>
-                 <input type="text" placeholder="Search Assets..." className="bg-transparent border-none outline-none text-[10px] text-gray-300 w-full placeholder-gray-600"/>
-              </div>
-           </div>
-
-           <div className="p-3 grid grid-cols-2 gap-2 overflow-y-auto custom-scrollbar">
-              <div className="col-span-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 px-1">
-                 {categories.find(c => c.id === category)?.label}
-              </div>
-              
-              {presets.map(item => (
-                <div 
-                  key={item.id}
-                  onClick={() => addObject({ type: item.type, name: item.name })}
-                  className="aspect-square bg-[#1a1a1a] border border-[#333] rounded hover:border-[#0070e0] hover:bg-[#222] cursor-pointer transition-all group flex flex-col relative overflow-hidden"
-                >
-                   {/* Thumbnail Fake */}
-                   <div className="flex-1 p-4 flex items-center justify-center relative">
-                      <div className={`w-full h-full ${item.thumb} shadow-2xl group-hover:scale-105 transition-transform`}></div>
-                      <Plus size={16} className="absolute text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 rounded-full p-0.5"/>
-                   </div>
-                   {/* Label */}
-                   <div className="h-6 bg-[#0f0f0f] flex items-center px-2 border-t border-[#222]">
-                      <span className="text-[10px] text-gray-400 truncate group-hover:text-white">{item.name}</span>
-                   </div>
-                </div>
+        <div>
+           <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1">Asset Library</div>
+           <div className="grid grid-cols-2 gap-2">
+              {presets.map(p => (
+                 <div key={p.id} className="bg-[#0f0f0f] border border-[#333] rounded p-3 cursor-pointer hover:border-[#0070e0] hover:bg-[#1a1a1a] transition-all group" draggable onDragStart={(e) => handleDragStart(e, p)}>
+                    <div className="h-10 bg-[#222] rounded mb-2 w-full group-hover:bg-[#333] transition-colors"></div>
+                    <span className="text-[10px] font-bold text-gray-400 group-hover:text-white transition-colors">{p.name}</span>
+                 </div>
               ))}
            </div>
         </div>
@@ -162,155 +263,138 @@ const UE5AssetBrowser = () => {
   );
 };
 
-// 3. RIGHT SIDEBAR (Details Panel / Outliner)
-const UE5DetailsPanel = () => {
-  const { objects, selectedObjectId, selectObject, removeObject, transformMode, setTransformMode } = useSceneStore();
-  const { sculptSettings, setSculptSetting, paintSettings, setPaintSetting, activeTool } = useAppStore();
+// ==========================================
+// 4. PAINEL DIREITO (PAINT / PROPERTIES)
+// ==========================================
+const RightPanel = () => {
+  const { activeTool, paintSettings, setPaintSetting } = useAppStore();
+  const { transformMode, setTransformMode, selectedObjectId } = useSceneStore();
   
-  const selectedObj = objects.find(o => o.id === selectedObjectId);
+  const [brushSize, setBrushSize] = useState(paintSettings.brushSize);
+  const [opacity, setOpacity] = useState(paintSettings.opacity);
+  const [color, setColor] = useState(paintSettings.color);
 
-  return (
-    <div className="w-80 bg-[#151515] border-l border-[#222] flex flex-col h-full text-[11px] text-gray-300">
-      
-      {/* Título: Outliner */}
-      <div className="h-8 bg-[#1a1a1a] border-b border-[#333] flex items-center px-3 justify-between">
-        <span className="font-bold flex items-center gap-2">
-           <Layers size={12} className="text-[#0070e0]"/> OUTLINER
-        </span>
-      </div>
+  useEffect(() => { setPaintSetting('brushSize', brushSize); }, [brushSize]);
+  useEffect(() => { setPaintSetting('opacity', opacity); }, [opacity]);
+  useEffect(() => { setPaintSetting('color', color); }, [color]);
 
-      {/* Lista de Objetos (Compacta) */}
-      <div className="h-1/3 overflow-y-auto border-b border-[#222] bg-[#0f0f0f]">
-         {objects.map(obj => (
-            <div 
-              key={obj.id} 
-              onClick={() => selectObject(obj.id)}
-              className={`flex items-center px-2 py-1 gap-2 cursor-pointer border-l-2 ${selectedObjectId === obj.id ? 'bg-[#0070e0]/20 border-[#0070e0] text-white' : 'border-transparent hover:bg-[#222] text-gray-400'}`}
-            >
-               <Box size={12}/>
-               <span className="flex-1 truncate">{obj.name}</span>
-               <div className="flex gap-1 opacity-0 hover:opacity-100">
-                 <Eye size={10} className="hover:text-white"/>
-                 <Trash2 size={10} className="hover:text-red-500" onClick={(e) => {e.stopPropagation(); removeObject(obj.id)}}/>
+  if (activeTool === 'select') {
+    return (
+      <div className="w-80 bg-[#151515] border-l border-[#222] flex flex-col h-full text-gray-300">
+        <div className="flex border-b border-[#222] bg-[#1a1a1a] p-3 gap-1 items-center shadow-sm">
+           <span className="text-[11px] font-bold text-gray-400 flex items-center gap-2 tracking-widest"><MousePointer2 size={12}/> PROPERTIES</span>
+        </div>
+        {selectedObjectId ? (
+            <div className="p-4 space-y-4 text-[11px]">
+               <div className="bg-[#1a1a1a] p-3 rounded-lg border border-[#333] shadow-lg">
+                  <div className="font-bold text-gray-400 mb-3 border-b border-[#444] pb-2 uppercase tracking-wide">Transform</div>
+                  <div className="flex gap-1">
+                      <button onClick={() => setTransformMode('translate')} className={`flex-1 py-1.5 rounded border border-[#333] transition-colors ${transformMode === 'translate' ? 'bg-[#0070e0] text-white border-blue-500' : 'bg-[#222] hover:bg-[#2a2a2a]'}`} title="Move"><Move size={14} className="mx-auto"/></button>
+                      <button onClick={() => setTransformMode('rotate')} className={`flex-1 py-1.5 rounded border border-[#333] transition-colors ${transformMode === 'rotate' ? 'bg-[#0070e0] text-white border-blue-500' : 'bg-[#222] hover:bg-[#2a2a2a]'}`} title="Rotate"><Rotate3d size={14} className="mx-auto"/></button>
+                      <button onClick={() => setTransformMode('scale')} className={`flex-1 py-1.5 rounded border border-[#333] transition-colors ${transformMode === 'scale' ? 'bg-[#0070e0] text-white border-blue-500' : 'bg-[#222] hover:bg-[#2a2a2a]'}`} title="Scale"><Maximize size={14} className="mx-auto"/></button>
+                  </div>
+               </div>
+               <div className="bg-[#1a1a1a] p-3 rounded-lg border border-[#333]">
+                   <span className="text-gray-500 font-bold block mb-1">SELECTED OBJECT ID</span>
+                   <span className="text-white font-mono text-[10px] break-all">{selectedObjectId}</span>
                </div>
             </div>
-         ))}
+        ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-gray-600 italic">
+                <MousePointer2 size={24} className="mb-2 opacity-20"/>
+                <span className="text-[11px]">Select an object in the scene to edit properties or transform.</span>
+            </div>
+        )}
       </div>
+    );
+  }
 
-      {/* Título: Details */}
-      <div className="h-8 bg-[#1a1a1a] border-b border-[#333] flex items-center px-3 justify-between">
-        <span className="font-bold flex items-center gap-2">
-           <Grid3X3 size={12} className="text-[#0070e0]"/> DETAILS
-        </span>
-      </div>
+  if (activeTool === 'paint') {
+    return (
+        <div className="w-80 bg-[#151515] border-l border-[#222] flex flex-col h-full text-gray-300">
+          <div className="flex border-b border-[#222] bg-[#1a1a1a] p-3 gap-1 items-center shadow-sm">
+             <span className="text-[11px] font-bold text-purple-400 flex items-center gap-2 tracking-widest"><Palette size={12}/> PAINT TOOLS</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-[10px] font-bold text-gray-500 uppercase tracking-wide"><Brush size={12}/> Brush Settings</div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-gray-400 font-medium"><span>Size</span> <span>{brushSize}px</span></div>
+                <input type="range" min="1" max="100" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-full h-1.5 bg-[#333] rounded-lg appearance-none cursor-pointer accent-purple-500"/>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-gray-400 font-medium"><span>Opacity</span> <span>{(opacity * 100).toFixed(0)}%</span></div>
+                <input type="range" min="0" max="1" step="0.1" value={opacity} onChange={(e) => setOpacity(parseFloat(e.target.value))} className="w-full h-1.5 bg-[#333] rounded-lg appearance-none cursor-pointer accent-purple-500"/>
+              </div>
+            </div>
+            <div className="h-px bg-[#333]"></div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[10px] font-bold text-gray-500 uppercase tracking-wide"><Droplet size={12}/> Color Picker</div>
+              <HexColorPicker color={color} onChange={setColor} style={{width: '100%', height: '140px', borderRadius: '8px'}} />
+              <div className="flex gap-2 items-center bg-[#0f0f0f] p-1 rounded border border-[#333]">
+                 <div className="w-6 h-6 rounded border border-[#444]" style={{backgroundColor: color}}></div>
+                 <input type="text" value={color} className="flex-1 bg-transparent border-none text-[11px] text-gray-300 uppercase font-mono outline-none" readOnly/>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+  }
 
-      {/* Propriedades Dinâmicas */}
-      <div className="flex-1 overflow-y-auto p-1 bg-[#151515]">
-         {selectedObj ? (
-           <div className="space-y-1">
-             
-             {/* Transform Section */}
-             <div className="bg-[#1a1a1a] border border-[#222] rounded overflow-hidden">
-                <div className="bg-[#222] px-2 py-1 flex items-center gap-1 font-bold text-gray-400 border-b border-[#333]">
-                   <ChevronDown size={10}/> <span className="uppercase">Transform</span>
-                </div>
-                <div className="p-2 space-y-2">
-                   {/* Botões de Modo */}
-                   <div className="flex bg-[#0f0f0f] rounded p-0.5 mb-2">
-                      {[{id:'translate', icon:Move}, {id:'rotate', icon:Rotate3d}, {id:'scale', icon:Maximize}].map(m => (
-                        <button 
-                          key={m.id} 
-                          onClick={() => setTransformMode(m.id)}
-                          className={`flex-1 flex justify-center py-1 rounded hover:bg-[#333] ${transformMode === m.id ? 'bg-[#333] text-[#0070e0]' : 'text-gray-500'}`}
-                        >
-                          <m.icon size={12}/>
-                        </button>
-                      ))}
-                   </div>
-                   
-                   {['Location', 'Rotation', 'Scale'].map(label => (
-                     <div key={label} className="grid grid-cols-[60px_1fr_1fr_1fr] gap-1 items-center">
-                        <span className="text-gray-500">{label}</span>
-                        <input disabled value="0.0" className="bg-[#0f0f0f] border border-[#333] rounded px-1 text-right text-gray-300"/>
-                        <input disabled value="0.0" className="bg-[#0f0f0f] border border-[#333] rounded px-1 text-right text-gray-300"/>
-                        <input disabled value="0.0" className="bg-[#0f0f0f] border border-[#333] rounded px-1 text-right text-gray-300"/>
-                     </div>
-                   ))}
-                </div>
-             </div>
-
-             {/* Dynamic Tool Settings (Contextual) */}
-             {activeTool === 'sculpt' && (
-                <div className="bg-[#1a1a1a] border border-[#222] rounded overflow-hidden mt-2">
-                  <div className="bg-[#222] px-2 py-1 flex items-center gap-1 font-bold text-orange-400 border-b border-[#333]">
-                    <ChevronDown size={10}/> <span className="uppercase">Sculpt Settings</span>
-                  </div>
-                  <div className="p-2 space-y-3">
-                     <div>
-                       <div className="flex justify-between mb-1"><span>Radius</span> <span className="text-gray-500">{sculptSettings.radius.toFixed(2)}</span></div>
-                       <input type="range" min="0.1" max="1" step="0.01" value={sculptSettings.radius} onChange={(e) => setSculptSetting('radius', parseFloat(e.target.value))} className="w-full accent-[#0070e0] h-1 bg-[#333] rounded-full appearance-none"/>
-                     </div>
-                     <div>
-                       <div className="flex justify-between mb-1"><span>Strength</span> <span className="text-gray-500">{sculptSettings.intensity.toFixed(2)}</span></div>
-                       <input type="range" min="0.1" max="1" step="0.01" value={sculptSettings.intensity} onChange={(e) => setSculptSetting('intensity', parseFloat(e.target.value))} className="w-full accent-[#0070e0] h-1 bg-[#333] rounded-full appearance-none"/>
-                     </div>
-                  </div>
-                </div>
-             )}
-
-            {activeTool === 'paint' && (
-                <div className="bg-[#1a1a1a] border border-[#222] rounded overflow-hidden mt-2">
-                  <div className="bg-[#222] px-2 py-1 flex items-center gap-1 font-bold text-purple-400 border-b border-[#333]">
-                    <ChevronDown size={10}/> <span className="uppercase">Material Settings</span>
-                  </div>
-                  <div className="p-2 space-y-3">
-                     <div>
-                       <div className="flex justify-between mb-1"><span>Brush Size</span> <span className="text-gray-500">{paintSettings.brushSize}px</span></div>
-                       <input type="range" min="1" max="100" value={paintSettings.brushSize} onChange={(e) => setPaintSetting('brushSize', parseInt(e.target.value))} className="w-full accent-[#0070e0] h-1 bg-[#333] rounded-full appearance-none"/>
-                     </div>
-                     <div className="flex flex-col gap-2">
-                        <span>Albedo Color</span>
-                        <HexColorPicker color={paintSettings.color} onChange={(c) => setPaintSetting('color', c)} style={{width: '100%', height: '100px'}}/>
-                     </div>
-                  </div>
-                </div>
-             )}
-
-           </div>
-         ) : (
-           <div className="p-4 text-center text-gray-600 italic">
-              Select an asset to view details.
-           </div>
-         )}
-      </div>
-    </div>
-  );
+  return <div className="w-80 bg-[#151515] border-l border-[#222]"></div>;
 };
 
-// --- APP PRINCIPAL ---
+// ==========================================
+// 5. APP PRINCIPAL
+// ==========================================
 export default function App() {
+  const { mannequin, physics, setIsAltPressed, removeObject, selectedObjectId } = useSceneStore();
+  
+  // ATALHOS GLOBAIS
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Alt') setIsAltPressed(true);
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedObjectId) removeObject(selectedObjectId);
+      }
+    };
+    const handleKeyUp = (e) => {
+      if (e.key === 'Alt') setIsAltPressed(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [setIsAltPressed, removeObject, selectedObjectId]);
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#111] text-[#e0e0e0] font-sans select-none overflow-hidden">
       <UE5Header />
       <div className="flex flex-1 overflow-hidden relative">
-        <UE5AssetBrowser />
-        
+        <LeftPanelBlend />
         <main className="flex-1 relative bg-gradient-to-b from-[#1a1a1a] to-[#0a0a0a]">
-          <Canvas shadows camera={{ position: [2, 2, 4], fov: 45 }} gl={{ preserveDrawingBuffer: true }}>
-              <Suspense fallback={null}><MainScene /></Suspense>
+          <Canvas shadows camera={{ position: [0, 1.2, 2.5], fov: 45 }} gl={{ preserveDrawingBuffer: true }}>
+              <Suspense fallback={null}>
+                <MainScene 
+                  gender={mannequin.type} 
+                  physicsEnabled={physics.isEnabled} 
+                  isPlaying={mannequin?.animation?.isPlaying ?? true} 
+                />
+              </Suspense>
           </Canvas>
           <Loader />
           
-          {/* Overlay de Informação UE5 */}
-          <div className="absolute top-2 left-2 text-[10px] text-gray-500 font-mono">
-             PERSPECTIVE <span className="text-gray-700">|</span> LIT <span className="text-gray-700">|</span> SHOW
+          <div className="absolute top-4 right-4 flex gap-2">
+             <div className="bg-black/50 backdrop-blur px-3 py-1 rounded text-[10px] border border-white/10 text-white font-medium tracking-wide">LIT</div>
           </div>
-          <div className="absolute bottom-2 right-2 text-[10px] text-gray-600">
-             GRID: 10cm
+          <div className="absolute bottom-4 left-4 text-[10px] text-gray-500 font-mono bg-black/40 backdrop-blur px-3 py-1.5 rounded border border-white/5">
+             Hold <b>ALT</b> to rotate camera while painting • Press <b>DEL</b> to delete
           </div>
         </main>
-
-        <UE5DetailsPanel />
+        <RightPanel />
       </div>
     </div>
   );

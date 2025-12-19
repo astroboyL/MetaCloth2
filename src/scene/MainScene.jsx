@@ -1,57 +1,63 @@
-import React, { useEffect } from 'react';
-import { useThree } from '@react-three/fiber';
-import { Environment, Grid, ContactShadows, OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import React from 'react';
+import { OrbitControls, Grid, Environment, ContactShadows } from '@react-three/drei';
+import MannequinManager from '../components/canvas/mannequin/MannequinManager';
+import Attachment from '../components/canvas/Attachment';
 import useSceneStore from '../app/store/useSceneStore';
 import useAppStore from '../app/store/useAppStore';
 
-import MannequinManager from '../components/canvas/mannequin/MannequinManager';
-import Attachment from '../components/canvas/Attachment';
-import ExportManager from '../core/exporter/ExportManager';
-
-export default function MainScene() {
-  const { objects, updateObject, selectedObjectId, selectObject, isAltPressed, setIsAltPressed } = useSceneStore();
+const MainScene = ({ gender, physicsEnabled, isPlaying }) => {
+  const { objects, selectedObjectId, selectObject, updateObject, isAltPressed } = useSceneStore();
   const { activeTool } = useAppStore();
-  
-  useEffect(() => {
-    const down = (e) => { if (e.key === 'Alt') setIsAltPressed(true); };
-    const up = (e) => { if (e.key === 'Alt') setIsAltPressed(false); };
-    window.addEventListener('keydown', down); window.addEventListener('keyup', up);
-    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, [setIsAltPressed]);
 
-  const isEditing = activeTool === 'sculpt' || activeTool === 'paint';
-  const cameraEnabled = !isEditing || isAltPressed;
+  const cameraEnabled = activeTool === 'select' || isAltPressed;
 
   return (
-    <group onPointerMissed={() => selectObject(null)}>
-      <Environment preset="city" blur={0.8} />
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 5, 5]} intensity={2} castShadow />
+    <>
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow />
+      <spotLight position={[-5, 5, 2]} intensity={0.8} color="#ffffff" /> 
+      <Environment preset="city" blur={1} />
       
-      <ContactShadows resolution={1024} scale={10} blur={1.5} opacity={0.7} color="#000000" />
-      <Grid infiniteGrid fadeDistance={20} fadeStrength={5} sectionColor="#333" cellColor="#1a1a1a" position={[0, -0.01, 0]} />
-
-      <MannequinManager />
+      <Grid infiniteGrid fadeDistance={40} sectionColor="#444" cellColor="#222" />
+      
+      {/* CORREÇÃO CRÍTICA: key={gender} 
+          Isso força o React a recriar o componente do zero quando troca de M/F.
+          Isso conserta o bug da animação travar.
+      */}
+      <MannequinManager 
+        key={gender} 
+        type={gender} 
+        isPlaying={isPlaying} 
+      />
 
       {objects.map((obj) => (
         <Attachment
           key={obj.id}
-          id={obj.id}
           {...obj}
           isSelected={obj.id === selectedObjectId}
           onSelect={selectObject}
-          onGizmoChange={updateObject}
+          onGizmoChange={(id, newData) => updateObject(id, newData)}
         />
       ))}
 
-      <ExportManager />
+      {physicsEnabled && (
+        <mesh position={[0, 2.2, 0]}>
+          <sphereGeometry args={[0.05]} />
+          <meshBasicMaterial color="yellow" />
+        </mesh>
+      )}
 
-      <OrbitControls makeDefault enabled={cameraEnabled} minDistance={1} maxDistance={8} target={[0, 1, 0]} />
+      <ContactShadows resolution={1024} scale={10} blur={2} opacity={0.5} far={10} color="#000000" />
       
-      {/* GIZMO ESTILO BLENDER (Canto Superior Direito) */}
-      <GizmoHelper alignment="top-right" margin={[80, 80]}>
-        <GizmoViewport axisColors={['#ff3653', '#8adb00', '#2c8fdf']} labelColor="black" />
-      </GizmoHelper>
-    </group>
+      <OrbitControls 
+        makeDefault 
+        enabled={cameraEnabled} 
+        minPolarAngle={0} 
+        maxPolarAngle={Math.PI / 1.8} 
+        target={[0, 1, 0]} 
+      />
+    </>
   );
-}
+};
+
+export default MainScene;
